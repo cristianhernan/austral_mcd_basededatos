@@ -18,19 +18,44 @@
 -- Recomendación utilizar funciones de ventana.
 
 
+SELECT  sa.sale_code 
+       ,sa.sale_date 
+       ,sa.product_name 
+       ,sa.sale_amount 
+       ,isnull(round(AVG(sa.sale_amount) OVER ventana_promedio,2),0) AS sale_svg
+FROM 
+    (SELECT  s.code sale_code 
+	       ,s.sale_date 
+	       ,p.name product_name 
+	       ,SUM((si.price*si.quantity)-s.discount+s.delivery) sale_amount
+	FROM commerce.sale s
+	    INNER JOIN commerce.sale_item si ON s.code = si.sale_code
+	    INNER JOIN commerce.product p ON p.code = si.product_code
+	GROUP BY  s.code
+	         ,s.sale_date
+	         ,p.name 
+	 ) sa
+GROUP BY  sa.sale_date
+         ,sa.product_name
+         ,sa.sale_amount 
+ORDER BY sa.product_name
+         ,sa.sale_date
+WINDOW 
+ventana_promedio  AS (PARTITION BY sa.product_name ORDER BY sa.sale_date RANGE BETWEEN 2 PRECEDING AND 2 FOLLOWING EXCLUDE CURRENT ROW )
 
 select
-    sa.code,
-    sa.sale_date,
-    sa.product,
-    sa.sale_amount,
-    round(avg(sa.sale_amount) 
-        over (partition by sa.product 
-        ORDER BY sa.sale_date RANGE BETWEEN 2 PRECEDING AND 2 FOLLOWING ),2) as avg_amount
+    sa.sale_code
+    ,sa.sale_date
+    ,sa.product_name
+    ,sa.sale_amount
+    ,isnull(round(avg(sa.sale_amount) 
+        over (partition by sa.product_name 
+        ORDER BY sa.sale_date RANGE BETWEEN 2 PRECEDING AND 2 FOLLOWING EXCLUDE CURRENT ROW ),2),0) as sale_svg
 from (
-    select s.code
+    select 
+    s.code sale_code
     ,s.sale_date
-    ,p.name product
+    ,p.name product_name
     ,sum((si.price*si.quantity)-s.discount+s.delivery) sale_amount
         from
             commerce.sale s
@@ -40,8 +65,8 @@ from (
             on p.code = si.product_code
         group by s.code,s.sale_date,p.name
     ) sa
-group by sa.sale_date,sa.product,sa.sale_amount
-order by  sa.product,sa.sale_date
+group by sa.sale_date,sa.product_name,sa.sale_amount
+order by  sa.product_name,sa.sale_date
 
 
 select
@@ -169,7 +194,7 @@ round(avg(sale_prod.total) over (partition by sale_prod.sale_date)) prom
 select 
     s.code, 
     s.sale_date, 
-    sum((si.price*si.quantity)-s.discount) total
+    sum((si.price*si.quantity)-s.discount+s.delivery) total
 from
     commerce.sale s
     inner join commerce.sale_item si
