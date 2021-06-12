@@ -17,202 +17,103 @@
 -- como orden para las ventas anteriores y posteriores) 
 -- Recomendación utilizar funciones de ventana.
 
-
-SELECT  sa.sale_code 
-       ,sa.sale_date 
-       ,sa.product_name 
-       ,sa.sale_amount 
-       ,isnull(round(AVG(sa.sale_amount) OVER ventana_promedio,2),0) AS sale_svg
-FROM 
-    (SELECT  s.code sale_code 
-	       ,s.sale_date 
-	       ,p.name product_name 
-	       ,SUM((si.price*si.quantity)-s.discount+s.delivery) sale_amount
-	FROM commerce.sale s
-	    INNER JOIN commerce.sale_item si ON s.code = si.sale_code
-	    INNER JOIN commerce.product p ON p.code = si.product_code
-	GROUP BY  s.code
-	         ,s.sale_date
-	         ,p.name 
-	 ) sa
-GROUP BY  sa.sale_date
-         ,sa.product_name
-         ,sa.sale_amount 
-ORDER BY sa.product_name
-         ,sa.sale_date
-WINDOW 
-ventana_promedio  AS (PARTITION BY sa.product_name ORDER BY sa.sale_date RANGE BETWEEN 2 PRECEDING AND 2 FOLLOWING EXCLUDE CURRENT ROW )
-
+--No se refiere a 2 días anteriores, sino 2 ventas anteriores, 
+--ordenadas por día. De forma que si las 2 ventas anteriores fueron 1 semana antes, 
+--también se las considere para calcular el promedio. Y si fueron el mismo día, también.
+ --Dado que puede haber ventas con la misma fecha y hora, considerar el nro de venta (code)
+ -- para ordenar y elegir las 2 ventas anteriores del mismo producto.
 select
-    sa.sale_code
-    ,sa.sale_date
-    ,sa.product_name
-    ,sa.sale_amount
-    ,isnull(round(avg(sa.sale_amount) 
-        over (partition by sa.product_name 
-        ORDER BY sa.sale_date RANGE BETWEEN 2 PRECEDING AND 2 FOLLOWING EXCLUDE CURRENT ROW ),2),0) as sale_svg
+    report.sale_code
+    ,report.sale_date
+    ,report.product_name
+    ,report.sale_amount
+    ,isnull(round(avg(report.sale_amount) over avg_window ,2),0) as avg_sales
 from (
-    select 
-    s.code sale_code
-    ,s.sale_date
-    ,p.name product_name
-    ,sum((si.price*si.quantity)-s.discount+s.delivery) sale_amount
-        from
-            commerce.sale s
-        inner join commerce.sale_item si
-            on s.code = si.sale_code
-        inner join commerce.product p
-            on p.code = si.product_code
-        group by s.code,s.sale_date,p.name
-    ) sa
-group by sa.sale_date,sa.product_name,sa.sale_amount
-order by  sa.product_name,sa.sale_date
+    select
+        sale_item.sale_code
+        ,sale.sale_date
+        ,product.name as product_name
+        ,(sale_item.price * sale_item.quantity)+((sale.delivery -sale.discount) / sale.item_count) sale_amount
+    from commerce.sale_item as sale_item
+        inner join commerce.product as product
+            on sale_item.product_code = product.code
+        inner join (select 
+                        sale.code
+                        ,sale.sale_date
+                        ,sale.delivery
+                        ,sale.discount
+                        ,(select count(*) from commerce.sale_item si where si.sale_code =sale.code) item_count
+                    from commerce.sale sale
+                    ) as sale
+            on sale.code=sale_item.sale_code
+        ) as report
+window
+avg_window as (partition by report.product_name order by report.sale_code
+    rows between 2 preceding and 2 following exclude current row)
+order by report.sale_code;
 
 
 select
-    sa.product,
-    sa.sale_amount,
-    sa.sale_date,
-    round(avg(sa.sale_amount) 
-        over (partition by sa.product 
-        ORDER BY sa.sale_date RANGE BETWEEN 2 PRECEDING AND 2 FOLLOWING ),2) as avg_amount
+    report.sale_code
+    ,report.sale_date
+    ,report.product_name
+    ,report.sale_amount
+    ,isnull(round(avg(report.sale_amount) over avg_window ,2),0) as avg_sales
 from (
-        select 
-            s.sale_date,
-            p.name product,
-            sum((si.price*si.quantity)-s.discount) sale_amount
-        from
-            commerce.sale s
-        inner join commerce.sale_item si
-            on s.code = si.sale_code
-        inner join commerce.product p
-            on p.code = si.product_code
-        group by p.name, s.sale_date
-    ) sa
+    select
+        sale_item.sale_code
+        ,sale.sale_date
+        ,product.name as product_name
+        ,(sale_item.price * sale_item.quantity)+((sale.delivery -sale.discount) / sale.item_count) sale_amount
+    from commerce.sale_item as sale_item
+        inner join commerce.product as product
+            on sale_item.product_code = product.code
+        inner join (select 
+                        sale.code
+                        ,sale.sale_date
+                        ,sale.delivery
+                        ,sale.discount
+                        ,(select count(*) from commerce.sale_item si where si.sale_code =sale.code) item_count
+                    from commerce.sale sale
+                    ) as sale
+            on sale.code=sale_item.sale_code
+        ) as report
+window
+avg_window as (partition by report.product_name order by report.sale_code
+    rows between 2 preceding and 2 following exclude current row)
+order by report.sale_code;
 
-select sa.product,
-    sa.sale_amount,
-    sa.sale_date,
-    round(avg(sa.sale_amount) over avg_windows,2) as avg_amount
-from (select s.sale_date,
-            p.name product,
-            sum((si.price*si.quantity)-s.discount) sale_amount
-        from
-            commerce.sale s
-            inner join commerce.sale_item si
-                on s.code = si.sale_code
-            inner join commerce.product p
-                on p.code = si.product_code
-        group by p.name, s.sale_date) sa
-WINDOW
-   avg_windows AS (partition by sa.product ORDER BY sa.sale_date ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING )
-order by sa.product,sa.sale_date;
-
-select sa.product,
-    sa.sale_amount,
-    sa.sale_date,
-    round(avg(sa.sale_amount) over avg_windows,2) as avg_amount
-from (select s.sale_date,
-            p.name product,
-            sum((si.price*si.quantity)-s.discount) sale_amount
-        from
-            commerce.sale s
-            inner join commerce.sale_item si
-                on s.code = si.sale_code
-            inner join commerce.product p
-                on p.code = si.product_code
-        group by p.name, s.sale_date) sa
-WINDOW
-   avg_windows AS (partition by sa.product ORDER BY sa.sale_date RANGE BETWEEN 2 PRECEDING AND 2 FOLLOWING )
-order by sa.product,sa.sale_date
-
-select p.name, p.price, s.sale_date,
-round(AVG(SUM(x.total + s.delivery - s.discount)) OVER 
-(ORDER BY s.sale_date RANGE BETWEEN 2 PRECEDING
-AND 2 FOLLOWING),2)  promedio
-from commerce.product p 
-join (
-      select si.sale_code, si.product_code, sum(si.quantity * si.price) total
-      from commerce.sale_item si
-      group by si.sale_code, si.product_code
-      ) x on p.code = x.product_code
-join commerce.sale s on x.sale_code = s.code
-group by p.name, p.price, s.sale_date
-
-SELECT 
-    s.sale_date,
-    p.name,
-    p.price,
-    round(avg(sum(si.quantity))
-    OVER(PARTITION BY p.code ORDER BY s.sale_date ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING),2) as win_avg
-FROM commerce.sale_item si
-JOIN commerce.sale s ON s.code=si.sale_code
-JOIN commerce.product p ON si.product_code=p.code
-GROUP BY p.name,s.sale_date,p.price
-ORDER BY p.name,s.sale_date
-
-
-select 
-    p.name prod_name,
-    s.sale_date,
-    (sum(si.quantity*si.price)-s.discount)  total
-    round(AVG((sum(si.quantity*si.price)-s.discount))) OVER 
-    (ORDER BY s.sale_date RANGE 2 PRECEDING),2)  promedio
-from commerce.sale_item si
-    inner join commerce.sale s 
-        on s.code = si.sale_code
-    inner join commerce.product p 
-        on p.code = si.product_code
-group by p.name, s.sale_date
-
-SELECT
-  empid,
-  departamento,
-  salario,
-  edad,
-  avg(salario) OVER ventana_departamento AS salario_medio 
-FROM empleado 
-WINDOW 
-  ventana_departamento AS (PARTITION BY departamento);
-
-select sale_prod.prod_name,sale_prod.sale_date,
-round(avg(sale_prod.total) over (partition by sale_prod.sale_date)) prom
-    from(
-    select 
-        p.name prod_name,
-        s.sale_date,
-       ( sum(si.quantity*si.price)-s.discount)  total
-    from commerce.sale_item si
-        inner join commerce.sale s on s.code = si.sale_code
-        inner join commerce.product p on p.code = si.product_code
-    group by p.name, s.sale_date,s.discount) sale_prod;
 
 
 --2-Obtener el monto total de cada venta,
 --se quiere obtener código de venta, fecha de la venta y el monto total de la misma.
 
-select 
-    s.code, 
-    s.sale_date, 
-    sum((si.price*si.quantity)-s.discount+s.delivery) total
-from
-    commerce.sale s
-    inner join commerce.sale_item si
-        on s.code = si.sale_code
-group by s.code,s.sale_date;
+select
+    sale.code
+    ,sale.sale_date
+    ,(sale_item.gross_amount + sale.delivery - sale.discount) as total_amount
+from commerce.sale as sale 
+inner join
+    (select 
+        sale_code
+        ,sum(price*quantity) gross_amount
+    from commerce.sale_item
+    group by sale_code
+    ) as sale_item 
+        on sale_item.sale_code = sale.code;
 
 --3-Obtener por cada producto su código, 
 --su nombre y la cantidad de unidades vendidas.
 
 select
-    p.code,
-    p.name,
-    isnull(sum(quantity),0) cant
+    product.code,
+    product.name as product_name,
+    isnull(sum(sale_item.quantity),0) quantity_solded
 from 
-    commerce.product p
-left join commerce.sale_item si 
-    on p.code = si.product_code
-group by p.code, p.name;
+    commerce.product as product
+left join commerce.sale_item as sale_item 
+    on product.code = sale_item.product_code
+group by product.code, product.name;
 
 --4-Obtener todos los proveedores (supplier) 
 --que se encuentran en ciudades 
@@ -220,11 +121,10 @@ group by p.code, p.name;
 
 --usando join
 select distinct
-    su.*
- from 
-    commerce.supplier su
-    inner join commerce.store st
-        on st.city = su.city;
+    supplier.*
+from commerce.supplier as supplier
+    inner join commerce.store  as store
+        on store.city = supplier.city;
 
 --usando in
 select 
@@ -247,11 +147,22 @@ where exists (select 1
 --compras en sucursales (store) de su misma ciudad (city)
 
 select distinct
+    customer.*
+from commerce.customer as  customer
+    inner join commerce.sale as sale
+        on customer.code = sale.customer_code
+    inner join commerce.store as store
+        on sale.store_code = store.code
+where 
+    store.city = customer.city;
+
+
+select distinct
     cu.*
 from commerce.customer cu
-inner join commerce.sale sa
-    on cu.code = sa.customer_code
-inner join commerce.store st
-    on sa.store_code = st.code
+    inner join commerce.sale sa
+        on cu.code = sa.customer_code
+    inner join commerce.store st
+        on sa.store_code = st.code
 where 
-    st.city = cu.city
+    st.city = cu.city;
